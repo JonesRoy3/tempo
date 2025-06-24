@@ -31,56 +31,56 @@ fn main() -> eyre::Result<()> {
     let address = Address::new([0; 20]);
 
     Cli::<MalachiteChainSpecParser, NoArgs>::parse().run(|builder, _: NoArgs| async move {
-            // Launch the Reth node first to get the engine handle
-            let reth_node = RethNode::new();
-            let NodeHandle {
-                node,
-                node_exit_future,
-            } = builder.node(reth_node).launch().await?;
+        // Launch the Reth node first to get the engine handle
+        let reth_node = RethNode::new();
+        let NodeHandle {
+            node,
+            node_exit_future,
+        } = builder.node(reth_node).launch().await?;
 
-            // Get the beacon engine handle
-            let app_handle = node.add_ons_handle.beacon_engine_handle.clone();
+        // Get the beacon engine handle
+        let app_handle = node.add_ons_handle.beacon_engine_handle.clone();
 
-            // Get the provider from the node to create the store
-            let provider = node.provider.clone();
-            let store = Store::new(Arc::new(provider));
+        // Get the provider from the node to create the store
+        let provider = node.provider.clone();
+        let store = Store::new(Arc::new(provider));
 
-            // Now create the application state with the engine handle and store
-            let state = State::new(
-                ctx.clone(),
-                config,
-                genesis.clone(),
-                address,
-                store,
-                app_handle,
-            );
+        // Now create the application state with the engine handle and store
+        let state = State::new(
+            ctx.clone(),
+            config,
+            genesis.clone(),
+            address,
+            store,
+            app_handle,
+        );
 
-            // Get the home directory
-            let home_dir = PathBuf::from("./data"); // In production, use proper data dir
+        // Get the home directory
+        let home_dir = PathBuf::from("./data"); // In production, use proper data dir
 
-            // Create Malachite consensus engine configuration
-            let engine_config = EngineConfig::new(
-                "reth-malachite-1".to_string(),
-                "node-0".to_string(),
-                "127.0.0.1:26657".parse()?,
-            );
+        // Create Malachite consensus engine configuration
+        let engine_config = EngineConfig::new(
+            "reth-malachite-1".to_string(),
+            "node-0".to_string(),
+            "127.0.0.1:26657".parse()?,
+        );
 
-            // Start the Malachite consensus engine
-            let consensus_handle = start_consensus_engine(state, engine_config, home_dir).await?;
+        // Start the Malachite consensus engine
+        let consensus_handle = start_consensus_engine(state, engine_config, home_dir).await?;
 
-            // Wait for the node to exit
-            tokio::select! {
-                _ = node_exit_future => {
-                    tracing::info!("Reth node exited");
-                }
-                _ = consensus_handle.app => {
-                    tracing::info!("Consensus engine exited");
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("Received shutdown signal");
-                }
+        // Wait for the node to exit
+        tokio::select! {
+            _ = node_exit_future => {
+                tracing::info!("Reth node exited");
             }
+            _ = consensus_handle.app => {
+                tracing::info!("Consensus engine exited");
+            }
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("Received shutdown signal");
+            }
+        }
 
-            Ok(())
-        })
+        Ok(())
+    })
 }

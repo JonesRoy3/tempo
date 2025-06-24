@@ -12,7 +12,7 @@ use tracing::{error, info};
 /// This function receives messages from the Malachite consensus engine and
 /// delegates them to the appropriate methods on the application state.
 pub async fn run_consensus_handler(
-    state: &mut State,
+    state: &State,
     channels: &mut Channels<MalachiteContext>,
 ) -> eyre::Result<()> {
     while let Some(msg) = channels.consensus.recv().await {
@@ -22,7 +22,7 @@ pub async fn run_consensus_handler(
                 info!("Consensus engine is ready");
 
                 // Determine the starting height
-                let start_height = state.current_height;
+                let start_height = state.current_height()?;
                 let validator_set = state.get_validator_set(start_height);
 
                 if reply.send((start_height, validator_set)).is_err() {
@@ -41,15 +41,16 @@ pub async fn run_consensus_handler(
                 info!(%height, %round, %proposer, ?role, "Started new round");
 
                 // Update state with current round info
-                state.current_height = height;
-                state.current_round = round;
-                state.current_proposer = Some(proposer);
+                state.set_current_height(height)?;
+                state.set_current_round(round)?;
+                state.set_current_proposer(Some(proposer))?;
                 // Convert malachitebft_app::consensus::Role to our app::Role
-                state.current_role = match role {
+                let app_role = match role {
                     malachitebft_app::consensus::Role::Proposer => crate::app::Role::Proposer,
                     malachitebft_app::consensus::Role::Validator => crate::app::Role::Validator,
                     malachitebft_app::consensus::Role::None => crate::app::Role::None,
                 };
+                state.set_current_role(app_role)?;
 
                 // Check if we have any pending proposals for this height/round
                 let proposals = vec![]; // TODO: Query from state storage
@@ -158,8 +159,9 @@ pub async fn run_consensus_handler(
                 match state.commit(certificate.clone(), extensions).await {
                     Ok(_) => {
                         // Move to next height
-                        let next_height = state.current_height.increment();
-                        state.current_height = next_height;
+                        let current = state.current_height()?;
+                        let next_height = current.increment();
+                        state.set_current_height(next_height)?;
 
                         if reply
                             .send(ConsensusMsg::StartHeight(
@@ -174,10 +176,11 @@ pub async fn run_consensus_handler(
                     Err(e) => {
                         error!(%e, "Failed to commit decided value");
                         // Restart the current height
+                        let current = state.current_height()?;
                         if reply
                             .send(ConsensusMsg::RestartHeight(
-                                state.current_height,
-                                state.get_validator_set(state.current_height),
+                                current,
+                                state.get_validator_set(current),
                             ))
                             .is_err()
                         {

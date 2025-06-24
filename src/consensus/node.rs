@@ -168,11 +168,9 @@ impl Node for MalachiteNode {
         let tx_event = channels.events.clone();
 
         // Spawn the application handler task
-        let mut app_state = self.app_state.clone();
+        let app_state = self.app_state.clone();
         let app_handle = tokio::spawn(async move {
-            if let Err(e) =
-                super::handler::run_consensus_handler(&mut app_state, &mut channels).await
-            {
+            if let Err(e) = super::handler::run_consensus_handler(&app_state, &mut channels).await {
                 tracing::error!(%e, "Consensus handler error");
             }
         });

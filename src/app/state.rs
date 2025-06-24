@@ -20,31 +20,66 @@ use reth_node_builder::NodeTypes;
 use reth_node_ethereum::EthereumNode;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
+use tokio::sync::Mutex as TokioMutex;
 use tokio::time::sleep;
 use tracing::info;
 
+/// Thread-safe wrapper for StdRng
+#[derive(Debug)]
+struct ThreadSafeRng {
+    inner: Arc<TokioMutex<StdRng>>,
+}
+
+impl ThreadSafeRng {
+    fn new(seed: u64) -> Self {
+        Self {
+            inner: Arc::new(TokioMutex::new(StdRng::seed_from_u64(seed))),
+        }
+    }
+
+    async fn with_rng<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StdRng) -> R,
+    {
+        let mut rng = self.inner.lock().await;
+        f(&mut rng)
+    }
+}
+
+impl Clone for ThreadSafeRng {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
+
 /// Represents the internal state of the application node
 /// Contains information about current height, round, proposals and blocks
-#[derive(Debug, Clone)]
+/// Thread-safe for concurrent access
+#[derive(Clone)]
 pub struct State {
+    // Immutable fields (no synchronization needed)
     pub ctx: MalachiteContext,
     pub config: Config,
     pub genesis: Genesis,
     pub address: Address,
-    pub current_height: Height,
-    pub current_round: Round,
-    pub current_proposer: Option<BasePeerAddress>,
-    pub current_role: Role,
-    pub peers: HashSet<MalachitePeerId>,
-    pub store: Store,
-
+    pub store: Store, // Already thread-safe
     pub signing_provider: Ed25519Provider,
-    pub streams_map: PartStreamsMap,
-    pub rng: StdRng,
-
-    // Handle to the beacon consensus engine
     pub engine_handle: BeaconConsensusEngineHandle<<EthereumNode as NodeTypes>::Payload>,
+
+    // Mutable fields wrapped in RwLock for concurrent read/write access
+    current_height: Arc<RwLock<Height>>,
+    current_round: Arc<RwLock<Round>>,
+    current_proposer: Arc<RwLock<Option<BasePeerAddress>>>,
+    current_role: Arc<RwLock<Role>>,
+    peers: Arc<RwLock<HashSet<MalachitePeerId>>>,
+    streams_map: Arc<RwLock<PartStreamsMap>>,
+
+    // Thread-safe RNG
+    rng: ThreadSafeRng,
 }
 
 impl State {
@@ -61,25 +96,115 @@ impl State {
             config,
             genesis,
             address,
-            current_height: Height::default(),
-            current_round: Round::Nil,
-            current_proposer: None,
-            current_role: Role::None,
-            peers: HashSet::new(),
             store,
             signing_provider: Ed25519Provider::new_test(),
-            streams_map: PartStreamsMap::new(),
-            rng: StdRng::seed_from_u64(seed_from_address(&address, std::process::id() as u64)),
             engine_handle,
+            current_height: Arc::new(RwLock::new(Height::default())),
+            current_round: Arc::new(RwLock::new(Round::Nil)),
+            current_proposer: Arc::new(RwLock::new(None)),
+            current_role: Arc::new(RwLock::new(Role::None)),
+            peers: Arc::new(RwLock::new(HashSet::new())),
+            streams_map: Arc::new(RwLock::new(PartStreamsMap::new())),
+            rng: ThreadSafeRng::new(seed_from_address(&address, std::process::id() as u64)),
         }
+    }
+
+    // Getter methods for thread-safe access
+    pub fn current_height(&self) -> Result<Height> {
+        Ok(*self
+            .current_height
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?)
+    }
+
+    pub fn set_current_height(&self, height: Height) -> Result<()> {
+        *self
+            .current_height
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))? = height;
+        Ok(())
+    }
+
+    pub fn current_round(&self) -> Result<Round> {
+        Ok(*self
+            .current_round
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?)
+    }
+
+    pub fn set_current_round(&self, round: Round) -> Result<()> {
+        *self
+            .current_round
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))? = round;
+        Ok(())
+    }
+
+    pub fn current_proposer(&self) -> Result<Option<BasePeerAddress>> {
+        Ok(self
+            .current_proposer
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .clone())
+    }
+
+    pub fn set_current_proposer(&self, proposer: Option<BasePeerAddress>) -> Result<()> {
+        *self
+            .current_proposer
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))? = proposer;
+        Ok(())
+    }
+
+    pub fn current_role(&self) -> Result<Role> {
+        Ok(*self
+            .current_role
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?)
+    }
+
+    pub fn set_current_role(&self, role: Role) -> Result<()> {
+        *self
+            .current_role
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))? = role;
+        Ok(())
+    }
+
+    pub fn add_peer(&self, peer: MalachitePeerId) -> Result<()> {
+        self.peers
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .insert(peer);
+        Ok(())
+    }
+
+    pub fn remove_peer(&self, peer: &MalachitePeerId) -> Result<bool> {
+        Ok(self
+            .peers
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .remove(peer))
+    }
+
+    pub fn get_peers(&self) -> Result<HashSet<MalachitePeerId>> {
+        Ok(self
+            .peers
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .clone())
     }
 
     pub fn signing_provider(&self) -> &Ed25519Provider {
         &self.signing_provider
     }
 
-    pub fn rng(&mut self) -> &mut StdRng {
-        &mut self.rng
+    // RNG access through async interface
+    pub async fn with_rng<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StdRng) -> R,
+    {
+        self.rng.with_rng(f).await
     }
 
     /// Returns the validator set for the given height
@@ -95,7 +220,7 @@ impl State {
 
     /// Creates a new proposal value for the given height and round
     pub async fn propose_value(
-        &mut self,
+        &self,
         height: Height,
         round: Round,
     ) -> Result<LocallyProposedValue<MalachiteContext>> {
@@ -114,7 +239,7 @@ impl State {
 
     /// Processes a received proposal part and potentially returns a complete proposal
     pub async fn received_proposal_part(
-        &mut self,
+        &self,
         from: MalachitePeerId,
         _part: StreamMessage<BaseProposalPart>,
     ) -> Result<Option<ProposedValue<MalachiteContext>>> {
@@ -125,7 +250,7 @@ impl State {
 
     /// Creates stream messages for a proposal
     pub fn stream_proposal(
-        &mut self,
+        &self,
         value: LocallyProposedValue<MalachiteContext>,
         _pol_round: Round,
     ) -> impl Iterator<Item = StreamMessage<BaseProposalPart>> {
@@ -136,7 +261,7 @@ impl State {
 
     /// Commits a decided value
     pub async fn commit(
-        &mut self,
+        &self,
         certificate: CommitCertificate<MalachiteContext>,
         _extensions: VoteExtensions<MalachiteContext>,
     ) -> Result<()> {
@@ -169,6 +294,36 @@ impl State {
             height, round
         );
         Ok(None)
+    }
+
+    // Stream map operations
+    pub fn get_stream(&self, peer_id: &MalachitePeerId) -> Result<Option<PartialStreamState>> {
+        Ok(self
+            .streams_map
+            .read()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .get_stream(peer_id)
+            .cloned())
+    }
+
+    pub fn insert_stream(
+        &self,
+        peer_id: MalachitePeerId,
+        stream: PartialStreamState,
+    ) -> Result<()> {
+        self.streams_map
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .insert_stream(peer_id, stream);
+        Ok(())
+    }
+
+    pub fn remove_stream(&self, peer_id: &MalachitePeerId) -> Result<Option<PartialStreamState>> {
+        Ok(self
+            .streams_map
+            .write()
+            .map_err(|_| eyre::eyre!("RwLock poisoned"))?
+            .remove_stream(peer_id))
     }
 }
 
