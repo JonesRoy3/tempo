@@ -5,7 +5,8 @@ use malachitebft_core_types::{
 };
 pub use malachitebft_signing_ed25519::{PrivateKey, PublicKey, Signature};
 
-use crate::context::{BaseProposal, BaseProposalPart, BaseVote, MalachiteContext};
+use crate::context::{BaseProposal, BaseVote, MalachiteContext};
+use crate::types::ProposalPart;
 use malachitebft_core_types::{Height as MalachiteHeight, NilOrVal, VoteType};
 
 /// Ed25519 signing provider for Malachite consensus
@@ -110,8 +111,8 @@ impl ToSignBytes for BaseVote {
 
         // Add value_id (32 bytes or 0 for nil)
         match &self.value_id {
-            NilOrVal::Val(id) => bytes.extend_from_slice(&id.0),
-            NilOrVal::Nil => bytes.extend_from_slice(&[0u8; 32]),
+            NilOrVal::Val(id) => bytes.extend_from_slice(&id.as_u64().to_be_bytes()),
+            NilOrVal::Nil => bytes.extend_from_slice(&[0u8; 8]),
         }
 
         // Add voter address (20 bytes)
@@ -133,7 +134,7 @@ impl ToSignBytes for BaseProposal {
         bytes.extend_from_slice(&self.round.0.as_u32().unwrap_or(0).to_le_bytes());
 
         // Add value data
-        bytes.extend_from_slice(&self.value.data);
+        bytes.extend_from_slice(&self.value.extensions);
 
         // Add proposer address (20 bytes)
         bytes.extend_from_slice(self.proposer.0.as_bytes());
@@ -145,24 +146,31 @@ impl ToSignBytes for BaseProposal {
     }
 }
 
-impl ToSignBytes for BaseProposalPart {
+impl ToSignBytes for ProposalPart {
     fn to_sign_bytes(&self) -> Vec<u8> {
         // Create a canonical byte representation for signing
-        let mut bytes = Vec::new();
-
-        // Add height (8 bytes)
-        bytes.extend_from_slice(&self.height.as_u64().to_le_bytes());
-
-        // Add round (4 bytes)
-        bytes.extend_from_slice(&self.round.0.as_u32().unwrap_or(0).to_le_bytes());
-
-        // Add value data
-        bytes.extend_from_slice(&self.value.data);
-
-        // Add proposer address (20 bytes)
-        bytes.extend_from_slice(self.proposer.0.as_bytes());
-
-        bytes
+        match self {
+            ProposalPart::Init(init) => {
+                let mut bytes = Vec::new();
+                bytes.push(0); // Type marker for Init
+                bytes.extend_from_slice(&init.height.as_u64().to_le_bytes());
+                bytes.extend_from_slice(&init.round.as_u32().unwrap_or(0).to_le_bytes());
+                bytes.extend_from_slice(init.proposer.as_bytes());
+                bytes
+            }
+            ProposalPart::Data(data) => {
+                let mut bytes = Vec::new();
+                bytes.push(1); // Type marker for Data
+                bytes.extend_from_slice(&data.bytes);
+                bytes
+            }
+            ProposalPart::Fin(fin) => {
+                let mut bytes = Vec::new();
+                bytes.push(2); // Type marker for Fin
+                bytes.extend_from_slice(fin.signature.to_bytes().as_ref());
+                bytes
+            }
+        }
     }
 }
 
@@ -199,7 +207,7 @@ impl SigningProvider<MalachiteContext> for Ed25519Provider {
 
     fn sign_proposal_part(
         &self,
-        proposal_part: BaseProposalPart,
+        proposal_part: ProposalPart,
     ) -> SignedProposalPart<MalachiteContext> {
         let signature = self.sign(&proposal_part.to_sign_bytes());
         SignedProposalPart::new(proposal_part, signature)
@@ -207,7 +215,7 @@ impl SigningProvider<MalachiteContext> for Ed25519Provider {
 
     fn verify_signed_proposal_part(
         &self,
-        proposal_part: &BaseProposalPart,
+        proposal_part: &ProposalPart,
         signature: &Signature,
         public_key: &PublicKey,
     ) -> bool {

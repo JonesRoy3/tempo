@@ -1,9 +1,10 @@
 //! Codec implementations for Malachite consensus messages
 
-use crate::context::{BasePeerAddress, BaseProposalPart, BaseValue, MalachiteContext};
+use crate::context::{BasePeerAddress, MalachiteContext};
+use crate::{ProposalPart, Value};
 use crate::height::Height;
 use crate::proto;
-use crate::{Address, ValueIdWrapper};
+use crate::{Address, ValueId};
 use bytes::Bytes;
 use malachitebft_app::engine::util::streaming::StreamMessage;
 use malachitebft_codec::Codec;
@@ -53,33 +54,31 @@ fn decode_votetype(vote_type: i32) -> VoteType {
 // For now, we'll implement only the essential codecs needed to compile
 // In production, all of these would have proper implementations
 
-impl Codec<BaseValue> for ProtoCodec {
+impl Codec<Value> for ProtoCodec {
     type Error = ProtoError;
 
-    fn decode(&self, bytes: Bytes) -> Result<BaseValue, Self::Error> {
+    fn decode(&self, bytes: Bytes) -> Result<Value, Self::Error> {
         let proto = proto::Value::decode(bytes.as_ref())?;
-        Ok(BaseValue {
-            data: proto.value.unwrap_or_default().to_vec(),
-        })
+        Ok(Value::new(proto.value.unwrap_or_default()))
     }
 
-    fn encode(&self, msg: &BaseValue) -> Result<Bytes, Self::Error> {
+    fn encode(&self, msg: &Value) -> Result<Bytes, Self::Error> {
         let proto = proto::Value {
-            value: Some(Bytes::from(msg.data.clone())),
+            value: Some(msg.extensions.clone()),
         };
         Ok(Bytes::from(proto.encode_to_vec()))
     }
 }
 
-impl Codec<BaseProposalPart> for ProtoCodec {
+impl Codec<ProposalPart> for ProtoCodec {
     type Error = ProtoError;
 
-    fn decode(&self, _bytes: Bytes) -> Result<BaseProposalPart, Self::Error> {
+    fn decode(&self, _bytes: Bytes) -> Result<ProposalPart, Self::Error> {
         // Placeholder implementation
         Err(ProtoError::Other("Not implemented".to_string()))
     }
 
-    fn encode(&self, _msg: &BaseProposalPart) -> Result<Bytes, Self::Error> {
+    fn encode(&self, _msg: &ProposalPart) -> Result<Bytes, Self::Error> {
         // Placeholder implementation
         Err(ProtoError::Other("Not implemented".to_string()))
     }
@@ -127,15 +126,15 @@ impl Codec<LivenessMsg<MalachiteContext>> for ProtoCodec {
     }
 }
 
-impl Codec<StreamMessage<BaseProposalPart>> for ProtoCodec {
+impl Codec<StreamMessage<ProposalPart>> for ProtoCodec {
     type Error = ProtoError;
 
-    fn decode(&self, _bytes: Bytes) -> Result<StreamMessage<BaseProposalPart>, Self::Error> {
+    fn decode(&self, _bytes: Bytes) -> Result<StreamMessage<ProposalPart>, Self::Error> {
         // Placeholder implementation
         Err(ProtoError::Other("Not implemented".to_string()))
     }
 
-    fn encode(&self, _msg: &StreamMessage<BaseProposalPart>) -> Result<Bytes, Self::Error> {
+    fn encode(&self, _msg: &StreamMessage<ProposalPart>) -> Result<Bytes, Self::Error> {
         // Placeholder implementation
         Err(ProtoError::Other("Not implemented".to_string()))
     }
@@ -194,7 +193,7 @@ pub fn encode_commit_certificate(
             .as_u32()
             .ok_or_else(|| ProtoError::Other("Round is nil, cannot encode".to_string()))?,
         value_id: Some(proto::ValueId {
-            value: Some(Bytes::from(certificate.value_id.as_bytes().to_vec())),
+            value: Some(Bytes::from(certificate.value_id.as_u64().to_be_bytes().to_vec())),
         }),
         signatures: certificate
             .commit_signatures
@@ -218,7 +217,7 @@ pub fn decode_commit_certificate(
     Ok(CommitCertificate {
         height: Height(proto.height),
         round: Round::new(proto.round),
-        value_id: ValueIdWrapper(value_id_bytes.to_vec()),
+        value_id: ValueId::new(u64::from_be_bytes(value_id_bytes[..8].try_into().unwrap_or([0u8; 8]))),
         commit_signatures: proto
             .signatures
             .into_iter()
@@ -276,7 +275,7 @@ fn encode_proposed_value(
             value: Bytes::from(proposed_value.proposer.0.as_bytes().to_vec()),
         }),
         value: Some(proto::Value {
-            value: Some(Bytes::from(proposed_value.value.data.clone())),
+            value: Some(proposed_value.value.extensions.clone()),
         }),
         validity: proposed_value.validity.to_bool(),
     })
@@ -313,9 +312,7 @@ fn decode_proposed_value(
                 ));
             }
         },
-        value: BaseValue {
-            data: value_data.to_vec(),
-        },
+        value: Value::new(value_data),
         validity: Validity::from_bool(proto.validity),
     })
 }

@@ -1,12 +1,11 @@
 use crate::height::Height;
 use crate::provider::{Ed25519Provider, PublicKey};
-use crate::types::Address;
-use hex;
+use crate::types::{Address, ProposalPart, Value, ValueId};
 use malachitebft_core_types::{
     Address as MalachiteAddress, Context, Extension as MalachiteExtension, NilOrVal,
-    Proposal as MalachiteProposal, ProposalPart as MalachiteProposalPart, Round, SignedMessage,
+    Proposal as MalachiteProposal, Round, SignedMessage,
     Validator as MalachiteValidator, ValidatorSet as MalachiteValidatorSet,
-    Value as MalachiteValue, Vote as MalachiteVote, VoteType,
+    Vote as MalachiteVote, VoteType,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -70,31 +69,14 @@ impl Display for BasePeerAddress {
 
 impl MalachiteAddress for BasePeerAddress {}
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct BaseProposalPart {
-    pub height: Height,
-    pub round: RoundWrapper,
-    pub value: BaseValue,
-    pub proposer: BasePeerAddress,
-}
-
-impl MalachiteProposalPart<MalachiteContext> for BaseProposalPart {
-    fn is_first(&self) -> bool {
-        self.round.0 == Round::Nil
-    }
-
-    fn is_last(&self) -> bool {
-        false // TODO: Implement proper logic
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BaseProposal {
     pub height: Height,
     pub round: RoundWrapper,
-    pub value: BaseValue,
+    pub value: Value,
     pub proposer: BasePeerAddress,
-    pub parts: Vec<BaseProposalPart>,
+    pub parts: Vec<ProposalPart>,
     pub pol_round: RoundWrapper,
 }
 
@@ -107,11 +89,11 @@ impl MalachiteProposal<MalachiteContext> for BaseProposal {
         self.round.0
     }
 
-    fn value(&self) -> &BaseValue {
+    fn value(&self) -> &Value {
         &self.value
     }
 
-    fn take_value(self) -> BaseValue {
+    fn take_value(self) -> Value {
         self.value
     }
 
@@ -169,44 +151,13 @@ impl MalachiteValidatorSet<MalachiteContext> for BasePeerSet {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct BaseValue {
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct ValueIdWrapper(pub Vec<u8>);
-
-impl ValueIdWrapper {
-    pub fn new(data: Vec<u8>) -> Self {
-        Self(data)
-    }
-
-    pub fn as_bytes(&self) -> &[u8] {
-        &self.0
-    }
-}
-
-impl MalachiteValue for BaseValue {
-    type Id = ValueIdWrapper;
-
-    fn id(&self) -> Self::Id {
-        ValueIdWrapper::new(self.data.clone())
-    }
-}
-
-impl std::fmt::Display for ValueIdWrapper {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "0x{}", hex::encode(&self.0))
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaseVote {
     pub vote_type: VoteTypeWrapper,
     pub height: Height,
     pub round: RoundWrapper,
-    pub value_id: NilOrVal<ValueIdWrapper>,
+    pub value_id: NilOrVal<ValueId>,
     pub voter: BasePeerAddress,
     pub extension: Option<SignedMessage<MalachiteContext, BaseExtension>>,
 }
@@ -244,11 +195,11 @@ impl MalachiteVote<MalachiteContext> for BaseVote {
         self.round.0
     }
 
-    fn value(&self) -> &NilOrVal<ValueIdWrapper> {
+    fn value(&self) -> &NilOrVal<ValueId> {
         &self.value_id
     }
 
-    fn take_value(self) -> NilOrVal<ValueIdWrapper> {
+    fn take_value(self) -> NilOrVal<ValueId> {
         self.value_id
     }
 
@@ -284,11 +235,11 @@ impl MalachiteExtension for BaseExtension {
 impl Context for MalachiteContext {
     type Address = BasePeerAddress;
     type Height = Height;
-    type ProposalPart = BaseProposalPart;
+    type ProposalPart = ProposalPart;
     type Proposal = BaseProposal;
     type Validator = BasePeer;
     type ValidatorSet = BasePeerSet;
-    type Value = BaseValue;
+    type Value = Value;
     type Vote = BaseVote;
     type Extension = BaseExtension;
     type SigningScheme = Ed25519Provider;
@@ -327,7 +278,7 @@ impl Context for MalachiteContext {
         &self,
         height: Self::Height,
         round: Round,
-        value_id: NilOrVal<ValueIdWrapper>,
+        value_id: NilOrVal<ValueId>,
         voter: Self::Address,
     ) -> Self::Vote {
         BaseVote {
@@ -344,7 +295,7 @@ impl Context for MalachiteContext {
         &self,
         height: Self::Height,
         round: Round,
-        value_id: NilOrVal<ValueIdWrapper>,
+        value_id: NilOrVal<ValueId>,
         voter: Self::Address,
     ) -> Self::Vote {
         BaseVote {
