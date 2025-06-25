@@ -54,6 +54,9 @@ fn main() -> eyre::Result<()> {
         // Get the beacon engine handle
         let app_handle = node.add_ons_handle.beacon_engine_handle.clone();
 
+        // Get the payload builder handle
+        let payload_builder_handle = node.payload_builder_handle.clone();
+
         // Get the provider from the node
         let provider = node.provider.clone();
 
@@ -66,6 +69,7 @@ fn main() -> eyre::Result<()> {
             address,
             Arc::new(provider),
             app_handle,
+            payload_builder_handle,
         )
         .await?;
 
