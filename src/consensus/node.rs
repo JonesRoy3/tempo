@@ -2,7 +2,7 @@
 
 use crate::{
     app::{Genesis, State},
-    consensus::config::{Config, EngineConfig, NodeConfig},
+    consensus::config::{Config, EngineConfig},
     context::{BasePeerAddress, MalachiteContext},
     provider::{Ed25519Provider, PrivateKey, PublicKey},
     types::Address,
@@ -10,13 +10,9 @@ use crate::{
 use async_trait::async_trait;
 use malachitebft_app::{
     events::{RxEvent, TxEvent},
-    node::{
-        CanGeneratePrivateKey, CanMakeConfig, CanMakeGenesis, CanMakePrivateKeyFile, EngineHandle,
-        MakeConfigSettings, Node, NodeHandle,
-    },
-    types::{core::VotingPower, Keypair},
+    node::{EngineHandle, Node, NodeHandle},
+    types::Keypair,
 };
-use rand::{CryptoRng, RngCore};
 use std::path::PathBuf;
 
 /// Implementation of Malachite's Node trait for reth-malachite
@@ -200,60 +196,5 @@ impl Node for MalachiteNode {
         }
 
         Ok(())
-    }
-}
-
-impl CanMakeGenesis for MalachiteNode {
-    fn make_genesis(&self, validators: Vec<(PublicKey, VotingPower)>) -> Self::Genesis {
-        // Create genesis with the given validators
-        let validator_infos = validators
-            .into_iter()
-            .map(|(_pk, vp)| {
-                // For now, use a placeholder conversion
-                // In production, derive address properly from public key
-                let address = Address::new([0u8; 20]);
-                let pk_bytes = vec![0u8; 32]; // Placeholder
-
-                crate::app::ValidatorInfo::new(address, vp, pk_bytes)
-            })
-            .collect();
-
-        Genesis::new(self.config.network.chain_id.clone()).with_validators(validator_infos)
-    }
-}
-
-impl CanGeneratePrivateKey for MalachiteNode {
-    fn generate_private_key<R>(&self, rng: R) -> PrivateKey
-    where
-        R: RngCore + CryptoRng,
-    {
-        PrivateKey::generate(rng)
-    }
-}
-
-impl CanMakePrivateKeyFile for MalachiteNode {
-    fn make_private_key_file(&self, private_key: PrivateKey) -> Self::PrivateKeyFile {
-        private_key
-    }
-}
-
-impl CanMakeConfig for MalachiteNode {
-    fn make_config(index: usize, _total: usize, _settings: MakeConfigSettings) -> Self::Config {
-        // For now, return a default config
-        // In production, this would generate appropriate config for node index out of total
-        let node_config = NodeConfig::new(
-            format!("node-{index}"),
-            format!("127.0.0.1:{}", 26000 + index),
-            Vec::new(),
-        );
-
-        Config {
-            moniker: node_config.moniker.clone(),
-            logging: node_config.logging,
-            consensus: node_config.consensus,
-            value_sync: node_config.value_sync,
-            metrics: node_config.metrics,
-            runtime: node_config.runtime,
-        }
     }
 }
