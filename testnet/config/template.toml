@@ -55,7 +55,7 @@ rpc_max_size = "10.5 MB"
 
 [consensus.p2p.discovery]
 # Enable peer discovery
-enabled = true
+enabled = false
 bootstrap_protocol = "full"
 selector = "random"
 num_outbound_peers = 2
