@@ -1,0 +1,13 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Ansible Galaxy requirements for Tempo infrastructure
+
+roles:
+  # Tailscale VPN setup
+  - name: artis3n.tailscale
+    version: ">=4.0.0"
+
+collections:
+  # Grafana collection for monitoring setup
+  - name: grafana.grafana
+    version: ">=2.0.0"
