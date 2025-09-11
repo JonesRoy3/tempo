@@ -11,7 +11,6 @@ use reth_node_builder::{
     NodeAdapter,
     rpc::{EthApiBuilder, EthApiCtx},
 };
-use reth_node_ethereum::EthereumEthApiBuilder;
 use reth_rpc::eth::{EthApi, core::EthRpcConverterFor};
 use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -253,9 +252,7 @@ impl<N: FullNodeTypes<Types = TempoNode>> EthTransactions for TempoEthApi<N> {
 }
 
 #[derive(Debug, Default)]
-pub struct TempoEthApiBuilder {
-    inner: EthereumEthApiBuilder,
-}
+pub struct TempoEthApiBuilder;
 
 impl<N> EthApiBuilder<NodeAdapter<N>> for TempoEthApiBuilder
 where
@@ -264,7 +261,11 @@ where
     type EthApi = TempoEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, NodeAdapter<N>>) -> eyre::Result<Self::EthApi> {
-        let eth_api_inner: EthApi<NodeAdapter<N>, _> = self.inner.build_eth_api(ctx).await?;
-        Ok(TempoEthApi::new(eth_api_inner))
+        let eth_api_builder = ctx
+            .eth_api_builder()
+            .modify_gas_oracle_config(|config| config.default_suggested_fee = Some(U256::ZERO));
+        let eth_api = eth_api_builder.map_converter(|r| r.with_network()).build();
+
+        Ok(TempoEthApi::new(eth_api))
     }
 }
